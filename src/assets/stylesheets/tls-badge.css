@@ -1,0 +1,2 @@
+.tls-badge{position:fixed;right:12px;bottom:10px;z-index:9999;padding:3px 10px;border-radius:12px;font:12px/1.6 sans-serif;color:#fff;text-decoration:none;background:#6b7785}
+.tls-badge.ok{background:#1f9d55}.tls-badge.warn{background:#d69e2e}.tls-badge.bad{background:#d64545}

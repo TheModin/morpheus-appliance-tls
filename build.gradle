@@ -1,0 +1,110 @@
+buildscript {
+    repositories {
+        mavenLocal()
+        maven { url "https://plugins.gradle.org/m2/" }
+    }
+    dependencies {
+        classpath "com.github.johnrengelman:shadow:8.1.1"
+    }
+}
+
+plugins {
+    id "com.bertramlabs.asset-pipeline" version "4.5.1"
+}
+
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'groovy'
+apply plugin: 'idea'
+
+group = 'io.github.themodin.morpheus'
+version = '0.9.0'
+
+sourceCompatibility = '1.11'
+targetCompatibility = '1.11'
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+configurations {
+    provided
+}
+
+dependencies {
+    // Supplied by the Morpheus appliance at runtime - NOT bundled into the plugin jar
+    provided "com.morpheusdata:morpheus-plugin-api:$morphPluginApiVersion"
+    provided "org.codehaus.groovy:groovy-all:$groovyVersion"
+
+    // Bundled into the plugin jar (plugins get an isolated classpath)
+    implementation "org.slf4j:slf4j-api:$slf4jVersion"
+    implementation "org.shredzone.acme4j:acme4j-client:$acme4jVersion"
+
+    testImplementation "com.morpheusdata:morpheus-plugin-api:$morphPluginApiVersion"
+    testImplementation "org.codehaus.groovy:groovy-all:$groovyVersion"
+    testImplementation "org.spockframework:spock-core:$spockVersion"
+    testImplementation 'io.reactivex.rxjava2:rxjava:2.2.0'
+    testRuntimeOnly "org.slf4j:slf4j-simple:$slf4jVersion"
+}
+
+sourceSets {
+    main {
+        compileClasspath += configurations.provided
+    }
+    test {
+        compileClasspath += configurations.provided
+        runtimeClasspath += configurations.provided
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+            'Plugin-Class': 'io.github.themodin.morpheus.tls.TlsAppliancePlugin',
+            'Plugin-Version': archiveVersion.get()
+        )
+    }
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        exceptionFormat = 'full'
+        showStandardStreams = true
+    }
+}
+
+tasks.withType(com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    destinationDirectory = file("$rootDir/build/plugin")
+}
+
+tasks.assemble.dependsOn tasks.shadowJar
+
+assets {
+    packagePlugin = false // plugin, not a library: compile assets for the appliance
+}
+
+// Self-contained root setup script: template + the helper and sudoers file from deploy/ embedded, so deploy/ stays the
+// single source of truth. Packaged in the plugin jar (the admin page serves it as a one-line command) and in the release.
+def setupOut = layout.buildDirectory.dir('generated/setup-resources')
+tasks.register('composeSetupScript') {
+    inputs.files('deploy/morpheus-tls-setup.sh.tpl', 'deploy/morpheus-tls-helper', 'deploy/sudoers-morpheus-tls')
+    outputs.dir(setupOut)
+    doLast {
+        def tpl = file('deploy/morpheus-tls-setup.sh.tpl').text
+        def helper = file('deploy/morpheus-tls-helper').text
+        def sudoers = file('deploy/sudoers-morpheus-tls').text
+        if (!tpl.contains('#@@HELPER@@') || !tpl.contains('#@@SUDOERS@@')) throw new GradleException('setup template placeholders missing')
+        def out = new File(setupOut.get().asFile, 'setup/morpheus-tls-setup.sh')
+        out.parentFile.mkdirs()
+        out.text = tpl.replace('#@@HELPER@@', helper.stripTrailing()).replace('#@@SUDOERS@@', sudoers.stripTrailing()) + (tpl.endsWith('\n') ? '' : '\n')
+    }
+}
+sourceSets.main.resources.srcDir(setupOut)
+processResources.dependsOn 'composeSetupScript'
+
+// Plugin asset URLs do not change between versions, so browsers keep serving cached JS/CSS after an upgrade.
+// Stamp the version into the admin page's asset URLs so a new version is fetched without a hard reload.
+processResources {
+    filesMatching('renderer/hbs/admin.hbs') { filter { String line -> line.replace('@VERSION@', project.version.toString()) } }
+}

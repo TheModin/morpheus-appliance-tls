@@ -1,0 +1,5 @@
+# /etc/sudoers.d/morpheus-tls   (install with: visudo -f /etc/sudoers.d/morpheus-tls ; chmod 0440)
+# "morpheus-app" is the OS user the Morpheus application runs as on the appliance - verify with:
+#   ps -o user= -C java | sort -u      (or: ps aux | grep morpheus-ui)
+morpheus-app ALL=(root) NOPASSWD: /usr/local/sbin/morpheus-tls-helper
+morpheus-app ALL=(root) NOPASSWD: /opt/morpheus/bin/morpheus-ctl restart nginx

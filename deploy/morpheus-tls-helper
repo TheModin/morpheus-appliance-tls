@@ -1,0 +1,95 @@
+#!/bin/bash
+# morpheus-tls-helper - root-side file helper for the Morpheus TLS Appliance Certificate plugin.
+#
+# Install as root:  install -o root -g root -m 0755 morpheus-tls-helper /usr/local/sbin/morpheus-tls-helper
+# The plugin calls it through "sudo -n". It is deliberately narrow:
+#   * only files below /etc/morpheus/ssl/ (symlinks are resolved first),
+#   * only *.pem, *.crt and *.key files (so never morpheus.rb, morpheus-secrets.json or *.conf),
+#   * writes must look like PEM data and use one of three file modes,
+#   * "prune" only touches timestamped directories below /etc/morpheus/ssl/backup/.
+# It cannot run commands, and there is no way to edit /etc/morpheus/morpheus.rb through it.
+#
+# Usage:
+#   morpheus-tls-helper read   PATH
+#   morpheus-tls-helper write  PATH MODE      (content on stdin, MODE one of 0600 0640 0644)
+#   morpheus-tls-helper copy   SRC DST        (creates the destination directory)
+#   morpheus-tls-helper delete PATH
+#   morpheus-tls-helper exists PATH
+#   morpheus-tls-helper prune  KEEP           (keep the newest KEEP backup directories, 1-50)
+#   morpheus-tls-helper version               (prints the helper version; used by the plugin's setup check)
+set -euo pipefail
+HELPER_VERSION=1
+ALLOWED_PREFIX="/etc/morpheus/ssl/"
+BACKUP_DIR="/etc/morpheus/ssl/backup"
+MAX_BYTES=1048576
+# Environment is only honoured when NOT running as root (used by the test-suite); under sudo it is ignored.
+if [ "$(id -u)" -ne 0 ]; then
+  ALLOWED_PREFIX="${LE_HELPER_ALLOWED_PREFIXES:-$ALLOWED_PREFIX}"
+  BACKUP_DIR="${LE_HELPER_BACKUP_DIR:-$BACKUP_DIR}"
+fi
+die() { echo "morpheus-tls-helper: $*" >&2; exit 2; }
+check_path() {
+  local p="$1" r
+  case "$p" in /*) ;; *) die "absolute path required: $p" ;; esac
+  case "$p" in *..*) die "'..' not allowed: $p" ;; esac
+  case "$p" in *$'\n'*) die "newline in path" ;; esac
+  r="$(realpath -m -- "$p")"   # resolves symlinks, so a link cannot point outside the allowed area
+  case "$r" in "$ALLOWED_PREFIX"*) ;; *) die "path not allowed: $p" ;; esac
+  case "$r" in *.pem|*.crt|*.key) ;; *) die "only .pem, .crt and .key files are allowed: $p" ;; esac
+}
+op="${1:-}"
+case "$op" in
+  version)
+    echo "morpheus-tls-helper $HELPER_VERSION"
+    ;;
+  read)
+    check_path "$2"
+    [ -e "$2" ] || { echo "No such file: $2" >&2; exit 3; }
+    cat -- "$2"
+    ;;
+  write)
+    check_path "$2"
+    case "${3:-}" in 0600|0640|0644) ;; *) die "mode not allowed: ${3:-}" ;; esac
+    dir="$(dirname -- "$2")"
+    mkdir -p -- "$dir"
+    tmp="$(mktemp "$dir/.le-XXXXXX")"
+    trap 'rm -f -- "$tmp"' EXIT
+    head -c "$((MAX_BYTES + 1))" > "$tmp"
+    [ "$(stat -c %s "$tmp")" -le "$MAX_BYTES" ] || die "content too large"
+    head -c 11 "$tmp" | grep -q -- '^-----BEGIN ' || die "content is not PEM data"
+    if LC_ALL=C grep -q -P '\x00' "$tmp"; then die "binary content"; fi
+    chmod "$3" "$tmp"
+    if [ "$(id -u)" -eq 0 ]; then chown root:root "$tmp"; fi
+    mv -f -- "$tmp" "$2"
+    trap - EXIT
+    ;;
+  copy)
+    check_path "$2"; check_path "$3"
+    mkdir -p -- "$(dirname -- "$3")"
+    cp -p -- "$2" "$3"
+    ;;
+  delete)
+    check_path "$2"
+    rm -f -- "$2"
+    ;;
+  exists)
+    check_path "$2"
+    [ -e "$2" ]
+    ;;
+  prune)
+    keep="${2:-}"
+    case "$keep" in ''|*[!0-9]*) die "KEEP must be a number" ;; esac
+    [ "$keep" -ge 1 ] && [ "$keep" -le 50 ] || die "KEEP must be between 1 and 50"
+    [ -d "$BACKUP_DIR" ] || exit 0
+    case "$(realpath -m -- "$BACKUP_DIR")" in "$ALLOWED_PREFIX"*) ;; *) die "backup dir not allowed" ;; esac
+    # timestamped directories only (yyyymmddHHMMSS), oldest first; delete all but the newest KEEP
+    mapfile -t dirs < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{14}' -printf '%f\n' | sort)
+    n=${#dirs[@]}
+    for ((i = 0; i < n - keep; i++)); do
+      rm -rf -- "${BACKUP_DIR:?}/${dirs[$i]}"
+    done
+    ;;
+  *)
+    die "unknown operation '$op'"
+    ;;
+esac
