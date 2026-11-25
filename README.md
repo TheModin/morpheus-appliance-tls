@@ -14,8 +14,8 @@ Admin page: `https://<your-manager>/plugin/tls/admin`
 
 > Status: v0.10.3. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
 > DNS-01/Cloudflare, scheduled renewal of a due certificate, and the one-command setup from a clean state). The
-> "run the setup through Morpheus" option has been tested with a dry run on a manager that is itself a managed
-> instance with an agent; a real install that restarts nginx over the agent connection has not been tested yet.
+> "run the setup through Morpheus" option has been tested end to end (dry run, then a real install including the
+> nginx restart) on a manager that is itself a managed instance with an agent.
 
 ## How it works
 
