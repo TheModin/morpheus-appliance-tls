@@ -9,6 +9,29 @@
     a.textContent = 'Certificate: ' + (st === 'OK' || st === 'RENEWAL_DUE' ? c.daysRemaining + ' days' : st.replace(/_/g, ' ').toLowerCase());
     a.className = 'tls-badge ' + (st === 'OK' ? 'ok' : st === 'RENEWAL_DUE' || st === 'STAGING' ? 'warn' : 'bad');
     a.style.display = 'block';
+    avoid();
+    // other floating widgets (e.g. the Morpheus Copilot button) may load later
+    [800, 2500, 6000].forEach(function (ms) { setTimeout(avoid, ms); });
+    window.addEventListener('resize', avoid);
+  }
+  // Keep the badge clear of whatever floats above it in the same corner: move it left of the widget that covers it.
+  function avoid() {
+    a.style.right = '12px';
+    var r = a.getBoundingClientRect();
+    if (!r.width || !document.elementsFromPoint) return;
+    var left = null, xs = [], ys = [r.top + 3, (r.top + r.bottom) / 2, r.bottom - 3];
+    for (var x = r.left + 2; x < r.right; x += 6) xs.push(x);
+    xs.forEach(function (x) {
+      ys.forEach(function (y) {
+        var stack = document.elementsFromPoint(x, y);
+        for (var i = 0; i < stack.length && stack[i] !== a; i++) {
+          var b = stack[i].getBoundingClientRect();
+          // a small floating widget (not a page-wide layer) that covers part of the badge
+          if (b.width > 0 && b.width < 220 && b.height < 220) left = left === null ? b.left : Math.min(left, b.left);
+        }
+      });
+    });
+    if (left !== null) a.style.right = Math.max(12, Math.round(window.innerWidth - left + 8)) + 'px';
   }
   // reuse the last answer for a few minutes so ordinary page navigation costs no request at all
   try {
