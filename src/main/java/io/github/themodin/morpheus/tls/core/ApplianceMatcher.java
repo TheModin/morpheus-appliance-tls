@@ -102,12 +102,19 @@ public final class ApplianceMatcher {
         return out;
     }
 
+    /** The OS host name, read without any DNS lookup (InetAddress.getLocalHost() can block for many seconds). */
     public static String localHostName() {
         try {
-            return InetAddress.getLocalHost().getHostName();
+            String h = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("/proc/sys/kernel/hostname")),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            if (!h.isEmpty()) {
+                return h;
+            }
         } catch (Exception e) {
-            return "";
+            // not Linux or not readable: try the environment
         }
+        String env = System.getenv("HOSTNAME");
+        return env == null ? "" : env.trim();
     }
 
     private static String lower(String s) {

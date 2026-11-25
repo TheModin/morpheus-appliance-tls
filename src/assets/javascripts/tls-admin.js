@@ -143,8 +143,11 @@
     if (!sel || !sel.value) return;
     var name = sel.options[sel.selectedIndex].text;
     if (mode === 'install' && !window.confirm('Run the setup as root on ' + name + '?\n\nIt backs up /etc/morpheus first and restarts the appliance web server, so this page may be unreachable for a few seconds.')) return;
+    // show that the click registered right away; the request itself can take a moment
+    morphRun = {running: true, starting: true, mode: mode, serverName: name, output: ''};
+    renderMorph();
     api('setup/run', {serverId: Number(sel.value), mode: mode}).then(function (d) {
-      if (d.error || d.started === false) { morphRun = {finishedAt: 'x', success: false, error: d.error || d.message, output: ''}; renderMorph(); return; }
+      if (d.error || d.started === false) { morphRun = {finishedAt: 'x', success: false, mode: mode, error: d.error || d.message, output: ''}; renderMorph(); return; }
       morphRun = {running: true, mode: mode, serverName: name, output: ''};
       renderMorph();
       morphPoll();
@@ -185,7 +188,7 @@
     var out = null, status = null;
     if (morphRun) {
       var r = morphRun;
-      if (r.running) status = h('p', {}, [h('span', {class: 'spin', 'aria-hidden': 'true'}), h('span', {text: ' ' + (r.mode === 'dry-run' ? 'Dry run' : 'Setup') + ' running on ' + (r.serverName || 'the server') + '\u2026'})]);
+      if (r.running) status = h('p', {}, [h('span', {class: 'spin', 'aria-hidden': 'true'}), h('span', {text: ' ' + (r.mode === 'dry-run' ? 'Dry run' : 'Setup') + (r.starting ? ' starting on ' : ' running on ') + (r.serverName || 'the server') + '\u2026'})]);
       else if (r.finishedAt) status = h('p', {class: 'muted', text: (r.mode === 'dry-run' ? 'Dry run' : 'Setup run') + ' finished' + (r.success ? '.' : ' without a success report from the agent - this is expected if the web server restarted; check the list above.') + (r.error ? ' ' + r.error : '')});
       if (r.output) { out = h('pre', {id: 'morph-out'}); out.textContent = r.output; }
       else if (r.finishedAt && r.debug) out = h('p', {class: 'muted', text: 'The agent returned no output. Details: ' + r.debug});
@@ -342,5 +345,6 @@
   load();
   loadSetup();
   morphLoad();
+  getCsrf().catch(function () { /* fetched again on the first click */ }); // warm the token so the first click does not wait for it
   api('setup/run').then(function (d) { if (d && d.running) { morphRun = d; renderMorph(); morphPoll(); } });
 })();

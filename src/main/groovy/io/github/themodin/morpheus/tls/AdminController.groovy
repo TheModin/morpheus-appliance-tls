@@ -125,21 +125,36 @@ class AdminController implements PluginController {
         JsonResponse.of(out)
     }
 
-    /** Managed Linux servers with an agent, best match for "this appliance" first. */
+    private final Map<Long, List> candidateCache = new java.util.concurrent.ConcurrentHashMap<Long, List>()
+    static final long CANDIDATE_TTL_MS = 30 * 1000L
+
+    /** Managed Linux servers with an agent, best match for "this appliance" first. Cached for a short time per account. */
     private List<ApplianceMatcher.Candidate> serverCandidates(ViewModel model) {
         Long accountId = model.user?.account?.id
-        DataQuery q = new DataQuery().withFilter('account.id', accountId)
-        List<ComputeServer> all = morpheus.services.computeServer.list(q)
+        List cached = candidateCache.get(accountId)
+        if (cached != null && System.currentTimeMillis() - (cached[0] as long) < CANDIDATE_TTL_MS) return cached[1] as List
+        long t0 = System.currentTimeMillis()
+        List<ComputeServer> all
+        try {
+            all = morpheus.services.computeServer.list(new DataQuery().withFilter('account.id', accountId)
+                    .withFilter('agentInstalled', true))
+        } catch (Throwable t) {
+            log.debug('Filtered server query failed ({}), listing all', t.toString())
+            all = morpheus.services.computeServer.list(new DataQuery().withFilter('account.id', accountId))
+        }
         List<ApplianceMatcher.Candidate> out = []
         all.each { ComputeServer s ->
             if (s.agentInstalled != true || (s.osType != null && s.osType != 'linux')) return
+            // only plain columns here: associations (interfaces, OS) would cost one extra query per server
             Set<String> ips = new LinkedHashSet<String>()
             [s.internalIp, s.externalIp, s.sshHost].each { if (it) ips << it.toString() }
-            try { s.interfaces?.each { i -> [i.ipAddress, i.publicIpAddress].each { if (it) ips << it.toString() } } } catch (Throwable ignored) { }
             out << new ApplianceMatcher.Candidate(s.id as long, s.name, s.hostname ?: s.name, ips as List, true,
-                    s.serverOs?.name, s.status)
+                    s.osType, s.status)
         }
-        return ApplianceMatcher.rank(out, ApplianceMatcher.localAddresses(), ApplianceMatcher.localHostName())
+        List<ApplianceMatcher.Candidate> ranked = ApplianceMatcher.rank(out, ApplianceMatcher.localAddresses(), ApplianceMatcher.localHostName())
+        candidateCache.put(accountId, [System.currentTimeMillis(), ranked])
+        log.info('Setup server list: {} servers in {} ms', ranked.size(), System.currentTimeMillis() - t0)
+        return ranked
     }
 
     /** Dropdown data for "run the setup through Morpheus". */
@@ -167,10 +182,11 @@ class AdminController implements PluginController {
         if (!(mode in ['install', 'dry-run'])) return error('mode must be install or dry-run')
         Long serverId = body.serverId?.toString()?.isLong() ? body.serverId.toString().toLong() : null
         if (serverId == null) return error('serverId is required')
-        ApplianceMatcher.Candidate chosen = serverCandidates(model).find { it.id == serverId }
-        if (chosen == null) return error('That server is not a managed Linux server with an agent')
         ComputeServer server = morpheus.services.computeServer.get(serverId)
-        if (server == null) return error('Server not found')
+        if (server == null || server.account?.id != model.user?.account?.id || server.agentInstalled != true ||
+                (server.osType != null && server.osType != 'linux')) {
+            return error('That server is not a managed Linux server with an agent')
+        }
         String command = setupScriptSource.command(mode == 'dry-run' ? 'install --dry-run' : 'install')
         if (command == null) return error('The setup script is not part of this build')
         boolean started = setupRunner.start(server, command, mode, model.user?.username ?: '?')

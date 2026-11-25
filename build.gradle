@@ -17,7 +17,7 @@ apply plugin: 'groovy'
 apply plugin: 'idea'
 
 group = 'io.github.themodin.morpheus'
-version = '0.10.4'
+version = '0.10.5'
 
 sourceCompatibility = '1.11'
 targetCompatibility = '1.11'
