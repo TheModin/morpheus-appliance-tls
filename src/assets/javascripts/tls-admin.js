@@ -108,11 +108,12 @@
   // ---- one-time root-side setup: checklist + one-line command -------------------------------------------------
   var setup = null, setupTimer = null, setupSig = null;
   // one persistent node: render() re-attaches it, so an opened script view survives page refreshes and polling
-  var setupBox = h('div', {id: 'setup-card'});
+  var setupBox = h('div', {id: 'setup-card', class: 'card'}, [h('p', {class: 'muted'}, [h('span', {class: 'spin', 'aria-hidden': 'true'}), h('span', {text: ' Checking the appliance setup\u2026'})])]);
   function loadSetup() {
     if (setupTimer) { clearTimeout(setupTimer); setupTimer = null; }
     return api('setup').then(function (d) {
       if (!d.error) setup = d;
+      else if (!setup) { setupBox.className = 'card'; setupBox.replaceChildren(h('p', {class: 'muted', text: 'Could not check the setup: ' + d.error})); }
       renderSetup();
       // while something is missing, keep checking so the list turns green by itself after the command was run
       if (setup && !setup.ready) setupTimer = setTimeout(loadSetup, 5000);
@@ -172,7 +173,7 @@
   }
   function renderMorph() {
     if (morphErr) { morph.replaceChildren(h('p', {class: 'muted', text: 'Running through Morpheus is not available here (' + morphErr + '). Use the command above.'})); return; }
-    if (!morphData) { morph.replaceChildren(h('p', {class: 'muted', text: 'Looking for this appliance among the managed servers\u2026'})); return; }
+    if (!morphData) { morph.replaceChildren(h('div', {}, [h('h3', {text: 'Or run it through Morpheus'}), h('p', {class: 'muted'}, [h('span', {class: 'spin', 'aria-hidden': 'true'}), h('span', {text: ' Identifying this appliance among the managed servers\u2026'})])])); return; }
     var list = morphData.servers || [];
     if (!list.length) {
       morph.replaceChildren(h('p', {class: 'muted', text: 'No managed Linux server with an agent was found, so the setup cannot be run through Morpheus. Use the command above.'}));
@@ -342,6 +343,10 @@
       load();
     });
   }
+  // show the Morpheus option (with a spinner) right away; the checklist and the server list fill in as they arrive
+  setupBox.replaceChildren(h('p', {class: 'muted'}, [h('span', {class: 'spin', 'aria-hidden': 'true'}), h('span', {text: ' Checking the appliance setup\u2026'})]), morph);
+  renderMorph();
+  app.replaceChildren(noticeBox, setupBox);
   load();
   loadSetup();
   morphLoad();
