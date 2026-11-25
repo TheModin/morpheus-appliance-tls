@@ -1,5 +1,6 @@
 package io.github.themodin.morpheus.tls
 
+import io.github.themodin.morpheus.tls.core.ApplianceMatcher
 import io.github.themodin.morpheus.tls.core.CertStatus
 import io.github.themodin.morpheus.tls.core.CommandRunner
 import io.github.themodin.morpheus.tls.core.SetupCheck
@@ -7,6 +8,8 @@ import io.github.themodin.morpheus.tls.core.RenewalSettings
 import io.github.themodin.morpheus.tls.core.TlsProbe
 import com.morpheusdata.core.MorpheusContext
 import com.morpheusdata.core.Plugin
+import com.morpheusdata.core.data.DataQuery
+import com.morpheusdata.model.ComputeServer
 import com.morpheusdata.model.Permission
 import com.morpheusdata.views.HTMLResponse
 import com.morpheusdata.views.HandlebarsRenderer
@@ -28,6 +31,8 @@ class AdminController implements PluginController {
     MorpheusContext morpheus
     SettingsStore store
     RenewalRunner runner
+    private final SetupScript setupScriptSource
+    private final SetupRunner setupRunner
     private HandlebarsRenderer renderer
     private volatile Map badgeCache
     private volatile long badgeCachedAt = 0L
@@ -35,6 +40,8 @@ class AdminController implements PluginController {
 
     AdminController(Plugin plugin, MorpheusContext morpheus, SettingsStore store, RenewalRunner runner) {
         this.plugin = plugin; this.morpheus = morpheus; this.store = store; this.runner = runner
+        this.setupScriptSource = new SetupScript(plugin.getClassLoader())
+        this.setupRunner = new SetupRunner(morpheus)
     }
 
     String getCode() { 'tlsAdminController' }
@@ -43,10 +50,13 @@ class AdminController implements PluginController {
 
     List<Route> getRoutes() {
         Permission p = Permission.build('tlsApplianceCert', 'full')
+        Permission ps = Permission.build('tlsApplianceSetup', 'full')
         [Route.build('/tls/admin', 'admin', p),
          Route.build('/tls/api/status', 'status', p),
          Route.build('/tls/api/badge', 'badge', p),
          Route.build('/tls/api/setup', 'setup', p),
+         Route.build('/tls/api/setup/servers', 'setupServers', ps),
+         Route.build('/tls/api/setup/run', 'setupRun', ps),
          Route.build('/tls/api/settings', 'settings', p),
          Route.build('/tls/api/run', 'run', p)]
     }
@@ -104,29 +114,67 @@ class AdminController implements PluginController {
                 s.certPath, s.keyPath)
         boolean ready = SetupCheck.ready(checks)
         Map out = [ready: ready, checks: checks]
-        String script = setupScript()
+        String script = setupScriptSource.script
         if (script != null) {
-            out.sha256 = MessageDigest.getInstance('SHA-256').digest(script.getBytes('UTF-8')).encodeHex().toString()
-            ByteArrayOutputStream bos = new ByteArrayOutputStream()
-            GZIPOutputStream gz = new GZIPOutputStream(bos)
-            gz.write(script.getBytes('UTF-8')); gz.close()
-            String b64 = Base64.encoder.encodeToString(bos.toByteArray())
-            out.command = "f=\$(mktemp) && echo '" + b64 + "' | base64 -d | gunzip > \"\$f\" && sudo bash \"\$f\" install; rm -f \"\$f\""
-            out.scriptBytes = script.getBytes('UTF-8').length
-            String q = model.request?.getParameter('script')
-            if (q == '1') out.script = script
+            out.sha256 = setupScriptSource.sha256
+            out.command = setupScriptSource.command('install')
+            out.uninstallCommand = setupScriptSource.command('uninstall')
+            out.scriptBytes = setupScriptSource.size
+            if (model.request?.getParameter('script') == '1') out.script = script
         }
         JsonResponse.of(out)
     }
 
-    private String setupScript() {
-        try {
-            InputStream is = plugin.getClassLoader().getResourceAsStream('setup/morpheus-tls-setup.sh')
-            return is == null ? null : new String(is.readAllBytes(), 'UTF-8')
-        } catch (Throwable t) {
-            log.warn('Could not read the setup script: {}', t.toString())
-            return null
+    /** Managed Linux servers with an agent, best match for "this appliance" first. */
+    private List<ApplianceMatcher.Candidate> serverCandidates(ViewModel model) {
+        Long accountId = model.user?.account?.id
+        DataQuery q = new DataQuery().withFilter('account.id', accountId)
+        List<ComputeServer> all = morpheus.services.computeServer.list(q)
+        List<ApplianceMatcher.Candidate> out = []
+        all.each { ComputeServer s ->
+            if (s.agentInstalled != true || (s.osType != null && s.osType != 'linux')) return
+            Set<String> ips = new LinkedHashSet<String>()
+            [s.internalIp, s.externalIp, s.sshHost].each { if (it) ips << it.toString() }
+            try { s.interfaces?.each { i -> [i.ipAddress, i.publicIpAddress].each { if (it) ips << it.toString() } } } catch (Throwable ignored) { }
+            out << new ApplianceMatcher.Candidate(s.id as long, s.name, s.hostname ?: s.name, ips as List, true,
+                    s.serverOs?.name, s.status)
         }
+        return ApplianceMatcher.rank(out, ApplianceMatcher.localAddresses(), ApplianceMatcher.localHostName())
+    }
+
+    /** Dropdown data for "run the setup through Morpheus". */
+    def setupServers(ViewModel<Map> model) {
+        remember(model)
+        try {
+            List<ApplianceMatcher.Candidate> ranked = serverCandidates(model)
+            ApplianceMatcher.Candidate rec = ApplianceMatcher.recommended(ranked)
+            JsonResponse.of([servers: ranked.collect { c -> [id: c.id, name: c.name, ips: c.ips, os: c.os, status: c.status,
+                                                              score: c.score, reason: c.reason] },
+                             recommendedId: rec?.id, localAddresses: ApplianceMatcher.localAddresses() as List])
+        } catch (Throwable t) {
+            log.warn('Could not list servers: {}', t.toString())
+            return error('Could not list the managed servers: ' + t.message, 500)
+        }
+    }
+
+    /** GET: progress of the current/last run. POST {serverId, mode: install|dry-run}: start a run. */
+    def setupRun(ViewModel<Map> model) {
+        remember(model)
+        if (!isPost(model)) return JsonResponse.of(setupRunner.state)
+        if (!xhr(model)) return forbidden()
+        Map body = readBody(model)
+        String mode = body.mode?.toString() ?: 'install'
+        if (!(mode in ['install', 'dry-run'])) return error('mode must be install or dry-run')
+        Long serverId = body.serverId?.toString()?.isLong() ? body.serverId.toString().toLong() : null
+        if (serverId == null) return error('serverId is required')
+        ApplianceMatcher.Candidate chosen = serverCandidates(model).find { it.id == serverId }
+        if (chosen == null) return error('That server is not a managed Linux server with an agent')
+        ComputeServer server = morpheus.services.computeServer.get(serverId)
+        if (server == null) return error('Server not found')
+        String command = setupScriptSource.command(mode == 'dry-run' ? 'install --dry-run' : 'install')
+        if (command == null) return error('The setup script is not part of this build')
+        boolean started = setupRunner.start(server, command, mode, model.user?.username ?: '?')
+        JsonResponse.of([started: started, message: started ? 'Started' : 'A setup run is already in progress'])
     }
 
     def settings(ViewModel<Map> model) {

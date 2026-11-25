@@ -24,3 +24,6 @@ button{padding:7px 14px;border-radius:6px;border:1px solid var(--line);backgroun
 .spin{flex:none;width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--warn);border-radius:50%;animation:le-spin .9s linear infinite}.notice.info .spin{border-top-color:var(--acc)}
 @keyframes le-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spin{animation:none}}
 .notice.bad{border-left-color:var(--bad);background:color-mix(in srgb,var(--bad) 16%,var(--card))}
+
+.hrow{display:flex;justify-content:space-between;align-items:center;gap:12px}.docs{color:var(--fg,inherit);text-decoration:none;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:4px 10px;background:var(--card)}.docs:hover{border-color:var(--muted)}
+.steps{margin:8px 0 0 18px;padding:0}.steps li{margin:8px 0}.steps code{font-size:12px}

@@ -127,6 +127,106 @@
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);
     else fallback();
   }
+
+  // ---- run the setup through Morpheus (the agent on the appliance), instead of pasting the command ----------------
+  // A persistent node, like setupBox, so the selection and the output survive the card being rebuilt.
+  var morph = h('div', {id: 'morph-box'});
+  var morphData = null, morphErr = null, morphRun = null, morphTimer = null, morphDown = 0;
+  function morphLoad() {
+    api('setup/servers').then(function (d) {
+      if (d.error) { morphErr = d.error; morphData = null; } else { morphErr = null; morphData = d; }
+      renderMorph();
+    });
+  }
+  function morphStart(mode) {
+    var sel = document.getElementById('morph-server');
+    if (!sel || !sel.value) return;
+    var name = sel.options[sel.selectedIndex].text;
+    if (mode === 'install' && !window.confirm('Run the setup as root on ' + name + '?\n\nIt backs up /etc/morpheus first and restarts the appliance web server, so this page may be unreachable for a few seconds.')) return;
+    api('setup/run', {serverId: Number(sel.value), mode: mode}).then(function (d) {
+      if (d.error || d.started === false) { morphRun = {finishedAt: 'x', success: false, error: d.error || d.message, output: ''}; renderMorph(); return; }
+      morphRun = {running: true, mode: mode, serverName: name, output: ''};
+      renderMorph();
+      morphPoll();
+    });
+  }
+  function morphPoll() {
+    if (morphTimer) { clearTimeout(morphTimer); morphTimer = null; }
+    api('setup/run').then(function (d) {
+      if (d.network) {
+        // the web server is restarting (the script reconfigures nginx): keep asking until it is back
+        morphDown++;
+        if (morphDown > 100) { showNotice('stuck'); return; }
+        if (noticeKind !== 'restart') showNotice('restart');
+        morphTimer = setTimeout(morphPoll, 3000);
+        return;
+      }
+      if (morphDown > 0) { morphDown = 0; showNotice('back', 6000); }
+      if (!d.error) morphRun = d;
+      renderMorph();
+      if (d.running) morphTimer = setTimeout(morphPoll, 2000); else loadSetup();
+    });
+  }
+  function renderMorph() {
+    if (morphErr) { morph.replaceChildren(h('p', {class: 'muted', text: 'Running through Morpheus is not available here (' + morphErr + '). Use the command above.'})); return; }
+    if (!morphData) { morph.replaceChildren(h('p', {class: 'muted', text: 'Looking for this appliance among the managed servers\u2026'})); return; }
+    var list = morphData.servers || [];
+    if (!list.length) {
+      morph.replaceChildren(h('p', {class: 'muted', text: 'No managed Linux server with an agent was found, so the setup cannot be run through Morpheus. Use the command above.'}));
+      return;
+    }
+    var running = !!(morphRun && morphRun.running);
+    var prev = document.getElementById('morph-server');
+    var chosen = prev ? prev.value : String(morphData.recommendedId || '');
+    var select = h('select', {id: 'morph-server', disabled: running}, list.map(function (x) {
+      var label = x.name + ' \u2013 ' + ((x.ips || [])[0] || 'no address') + (x.id === morphData.recommendedId ? '  (this appliance)' : '');
+      return h('option', {value: String(x.id), text: label, selected: String(x.id) === chosen});
+    }));
+    var out = null, status = null;
+    if (morphRun) {
+      var r = morphRun;
+      if (r.running) status = h('p', {}, [h('span', {class: 'spin', 'aria-hidden': 'true'}), h('span', {text: ' ' + (r.mode === 'dry-run' ? 'Dry run' : 'Setup') + ' running on ' + (r.serverName || 'the server') + '\u2026'})]);
+      else if (r.finishedAt) status = h('p', {class: 'muted', text: (r.mode === 'dry-run' ? 'Dry run' : 'Setup run') + ' finished' + (r.success ? '.' : ' without a success report from the agent - this is expected if the web server restarted; check the list above.') + (r.error ? ' ' + r.error : '')});
+      if (r.output) { out = h('pre', {id: 'morph-out'}); out.textContent = r.output; }
+      else if (r.finishedAt && r.debug) out = h('p', {class: 'muted', text: 'The agent returned no output. Details: ' + r.debug});
+    }
+    var why = morphData.recommendedId ? null : h('p', {class: 'muted', text: 'No managed server has the same address as this appliance, so none is preselected. Pick the server that is this Morpheus appliance.'});
+    morph.replaceChildren(h('div', {}, [
+      h('h3', {text: setup && setup.ready ? 'Run the setup again through Morpheus (safe to repeat)' : 'Or run it through Morpheus'}),
+      h('p', {class: 'muted', text: 'Morpheus runs the same script as root through the agent on the selected server. Nothing needs to be typed or pasted.'}),
+      why, h('div', {class: 'actions'}, [select,
+        h('button', {class: 'primary', disabled: running, text: 'Run setup', onclick: function () { morphStart('install'); }}),
+        h('button', {disabled: running, text: 'Dry run (change nothing)', onclick: function () { morphStart('dry-run'); }})]),
+      status, out].filter(Boolean)));
+  }
+
+  // ---- uninstall instructions (persistent node, so an opened section stays open while the page refreshes) ---------
+  var uninstallBox = h('div', {id: 'uninstall-card', class: 'card'});
+  (function buildUninstall() {
+    var msg = h('span', {class: 'muted'});
+    var code = function (t) { return h('code', {text: t}); };
+    uninstallBox.replaceChildren(h('details', {}, [
+      h('summary', {}, [h('b', {text: 'Uninstall'}), h('span', {class: 'muted', text: ' \u2013 how to remove the plugin and what it leaves behind'})]),
+      h('ol', {class: 'steps'}, [
+        h('li', {}, ['Point nginx back to the certificate Morpheus generates itself. On the appliance, edit ', code('/etc/morpheus/morpheus.rb'),
+          ' and delete the two lines under the comment ', code('# added by morpheus-tls-setup'), ' (', code("nginx['ssl_certificate']"), ' and ', code("nginx['ssl_server_key']"),
+          '). If the appliance used its own certificate before the setup, restore those lines from ', code('/etc/morpheus/morpheus.rb.bak-*'),
+          '. Then run ', code('sudo morpheus-ctl reconfigure'), ' (nginx restarts and serves the default certificate again).']),
+        h('li', {}, ['Remove the root-side helper and the sudoers rule. Paste this in a root-capable shell on the appliance:',
+          h('div', {class: 'actions'}, [h('button', {text: 'Copy uninstall command', onclick: function () {
+            var c = setup && setup.uninstallCommand;
+            if (!c) { msg.textContent = 'Not available in this build.'; return; }
+            copyText(c, function (ok) { msg.textContent = ok ? 'Copied.' : 'Copy failed.'; });
+          }}), msg]),
+          h('span', {class: 'muted', text: 'It removes /etc/sudoers.d/morpheus-tls and /usr/local/sbin/morpheus-tls-helper and touches nothing else.'})]),
+        h('li', {}, ['Delete the plugin: Administration \u203A Integrations \u203A Plugins \u203A TLS Appliance Certificate \u203A Delete. This page and the badge disappear.']),
+        h('li', {}, ['Delete the stored settings in Cypher (they hold the DNS API token): ', code('secret/appliance-tls/settings'), ' and ', code('secret/appliance-tls/lastrun'), '.']),
+        h('li', {}, ['Clean up key material you no longer want on the appliance: ', code('/etc/morpheus/ssl/cert.pem'), ', ', code('key.pem'), ', ', code('acme-account.pem'),
+          ' and the ', code('backup/'), ' folder in ', code('/etc/morpheus/ssl'), ', plus ', code('/root/etc-morpheus-backup-*.tgz'), ' and ', code('/etc/morpheus/morpheus.rb.bak-*'),
+          '. Only do this after step 1, since nginx uses cert.pem and key.pem until then.']),
+        h('li', {}, ['Revoke the DNS API token at your DNS provider (Cloudflare: My Profile \u203A API Tokens).'])]),
+      h('p', {class: 'muted'}, ['The full text is in the ', h('a', {href: 'https://github.com/TheModin/morpheus-appliance-tls#uninstall', target: '_blank', rel: 'noopener noreferrer', text: 'README'}), '.'])]));
+  })();
   function renderSetup() {
     var box = setupBox;
     if (!setup) return;
@@ -140,7 +240,7 @@
     });
     if (setup.ready) {
       box.className = 'card';
-      box.replaceChildren(h('details', {}, [h('summary', {}, [h('b', {text: 'Setup complete'}), h('span', {class: 'muted', text: ' \u2013 all checks passed (click for details)'})])].concat(items)));
+      box.replaceChildren(h('details', {}, [h('summary', {}, [h('b', {text: 'Setup complete'}), h('span', {class: 'muted', text: ' \u2013 all checks passed (click for details)'})])].concat(items, [morph])));
       return;
     }
     var msg = h('span', {class: 'muted', id: 'setupmsg'});
@@ -161,7 +261,8 @@
           h('button', {text: 'Check again', onclick: function () { msg.textContent = 'Checking\u2026'; loadSetup().then(function () { var m = document.getElementById('setupmsg'); if (m) m.textContent = ''; }); }}),
           msg]),
         h('p', {class: 'muted', text: 'The command carries the full script (' + (setup.scriptBytes || '?') + ' bytes, SHA-256 ' + (setup.sha256 || '?') + '). It backs up /etc/morpheus first and skips whatever is already in place. Add --dry-run after "install" to see what it would do.'}),
-        pre]) : h('p', {class: 'muted', text: 'The setup script is not available in this build.'})
+        pre]) : h('p', {class: 'muted', text: 'The setup script is not available in this build.'}),
+      morph
     ])));
   }
 
@@ -210,6 +311,7 @@
       if (l.log) lastKids.push(h('pre', {text: l.log}));
     }
     kids.push(h('div', {class: 'card'}, lastKids));
+    kids.push(uninstallBox);
     app.replaceChildren.apply(app, kids);
     renderSetup();
   }
@@ -239,4 +341,6 @@
   }
   load();
   loadSetup();
+  morphLoad();
+  api('setup/run').then(function (d) { if (d && d.running) { morphRun = d; renderMorph(); morphPoll(); } });
 })();

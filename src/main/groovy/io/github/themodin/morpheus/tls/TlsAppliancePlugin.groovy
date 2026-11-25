@@ -35,6 +35,7 @@ class TlsAppliancePlugin extends Plugin {
 
     @Override
     List<Permission> getPermissions() {
-        [new Permission("TLS Appliance Certificate", 'tlsApplianceCert', [Permission.AccessType.full])]
+        [new Permission("TLS Appliance Certificate", 'tlsApplianceCert', [Permission.AccessType.full]),
+         new Permission("TLS Appliance Setup (run the root-side setup through Morpheus)", 'tlsApplianceSetup', [Permission.AccessType.full])]
     }
 }

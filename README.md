@@ -12,8 +12,10 @@ Admin page: `https://<your-manager>/plugin/tls/admin`
 - footer badge ("Certificate: 63 days") for users with the permission; hidden for everyone else
 - follows the Morpheus user theme (light/dark)
 
-> Status: v0.9.0. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
-> DNS-01/Cloudflare, scheduled renewal of a due certificate, and the one-command setup from a clean state).
+> Status: v0.10.3. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
+> DNS-01/Cloudflare, scheduled renewal of a due certificate, and the one-command setup from a clean state). The
+> "run the setup through Morpheus" option has been tested with a dry run on a manager that is itself a managed
+> instance with an agent; a real install that restarts nginx over the agent connection has not been tested yet.
 
 ## How it works
 
@@ -59,6 +61,12 @@ Two steps: upload the plugin, then paste **one command** once on the appliance. 
      `/etc/morpheus/morpheus.rb` (backup `morpheus.rb.bak-<timestamp>`) and runs `morpheus-ctl reconfigure`. If that
      fails or nginx still does not use the files, `morpheus.rb` is restored.
 
+   **Alternative, no shell needed:** when the manager is itself a Morpheus-managed Linux server with an agent, the
+   card also offers **Run setup** and **Dry run** with a server dropdown (the server with the same IP address as the
+   appliance is preselected). Morpheus runs the same script through the agent, as the agent user with `sudo`. This
+   needs the separate permission `tlsApplianceSetup` (System Admin has it). A manager that runs outside the cluster
+   has no agent; use the command instead.
+
    The command carries the whole script (gzip + base64), so nothing has to be copied to the appliance first. "View
    script" shows it in readable form and the card prints its SHA-256. The same script is in the release bundle as
    `deploy/morpheus-tls-setup.sh` (`install`, `status`, `uninstall`, `--dry-run`, `--app-user NAME`).
@@ -73,8 +81,24 @@ works. The checklist verifies: helper present, sudo may run it, sudo may restart
 files (read from the rendered `/opt/morpheus/embedded/nginx/conf/sites-available/morpheus-ssl.conf`), and the files
 exist. Take a snapshot or backup before the first real run.
 
-To remove it: `... morpheus-tls-setup.sh uninstall` removes the sudoers rule and the helper; it leaves `morpheus.rb`
-and the certificates alone (remove the two lines marked `morpheus-tls-setup` and reconfigure to point nginx back).
+### Uninstall
+
+The admin page has the same steps under **Uninstall**, with a copy button for the command in step 2.
+
+1. **Point nginx back to Morpheus' own certificate.** Edit `/etc/morpheus/morpheus.rb` and delete the two lines under
+   the comment `# added by morpheus-tls-setup` (`nginx['ssl_certificate']` and `nginx['ssl_server_key']`). If the
+   appliance used its own certificate before the setup, restore those lines from `/etc/morpheus/morpheus.rb.bak-*`.
+   Then run `sudo morpheus-ctl reconfigure`.
+2. **Remove the helper and the sudoers rule:** `sudo bash morpheus-tls-setup.sh uninstall` (the script is in the
+   release bundle under `deploy/`). It removes `/etc/sudoers.d/morpheus-tls` and
+   `/usr/local/sbin/morpheus-tls-helper` and touches nothing else. `--dry-run` shows what it would do.
+3. **Delete the plugin:** Administration > Integrations > Plugins > TLS Appliance Certificate > Delete.
+4. **Delete the stored settings in Cypher** (they hold the DNS API token): `secret/appliance-tls/settings` and
+   `secret/appliance-tls/lastrun`.
+5. **Clean up key material:** `/etc/morpheus/ssl/cert.pem`, `key.pem`, `acme-account.pem` and the `backup/` folder
+   there, plus `/root/etc-morpheus-backup-*.tgz` and `/etc/morpheus/morpheus.rb.bak-*`. Do this after step 1, since
+   nginx uses `cert.pem` and `key.pem` until then.
+6. **Revoke the DNS API token** at your DNS provider.
 
 ### Upgrading
 
