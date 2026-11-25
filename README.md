@@ -95,6 +95,8 @@ outdated.
 
 ## Security notes
 
+Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
+
 - Least privilege: no broad `sudo`; see the helper and sudoers above. They must be installed by an admin, so a
   plugin upgrade cannot widen its own rights.
 - The private key is passed to the helper on stdin and never logged. The ACME account key is
