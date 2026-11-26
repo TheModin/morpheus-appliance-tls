@@ -27,3 +27,5 @@ button{padding:7px 14px;border-radius:6px;border:1px solid var(--line);backgroun
 
 .hrow{display:flex;justify-content:space-between;align-items:center;gap:12px}.docs{color:var(--fg,inherit);text-decoration:none;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:4px 10px;background:var(--card)}.docs:hover{border-color:var(--muted)}
 .steps{margin:8px 0 0 18px;padding:0}.steps li{margin:8px 0}.steps code{font-size:12px}
+
+h1 .ver{font-size:12px;font-weight:400;color:var(--muted);margin-left:6px}

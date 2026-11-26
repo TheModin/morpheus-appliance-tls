@@ -40,21 +40,19 @@ public class RenewalService {
     }
 
     static DnsProvider dnsProviderFor(RenewalSettings s) {
-        return "hook".equals(s.dnsProvider)
-                ? new HookDnsProvider(s.dnsHookScript)
-                : new CloudflareDnsProvider(s.cloudflareApiToken, s.cloudflareZoneId, s.cloudflareApiBase);
+        return new CloudflareDnsProvider(s.cloudflareApiToken, s.cloudflareZoneId, s.cloudflareApiBase);
     }
 
     /** Check-only runs also prove the DNS credentials work, without creating any record. */
     private void checkDnsAccess(RenewalSettings s, RenewalResult res) {
-        if (s.cloudflareApiToken == null && "cloudflare".equals(s.dnsProvider)) {
+        if (s.cloudflareApiToken == null) {
             res.log("DNS provider check: no Cloudflare API token configured");
             return;
         }
         try {
             String name = "_acme-challenge." + s.primaryDomain().replaceFirst("^\\*\\.", "");
             java.util.List<String> ns = dnsProviderFor(s).authoritativeServers(name);
-            res.log(ns.isEmpty() ? "DNS provider check: " + s.dnsProvider + " configured (no zone lookup available)"
+            res.log(ns.isEmpty() ? "DNS provider check: Cloudflare configured (no zone lookup available)"
                     : "DNS provider check OK: zone found, authoritative servers " + ns);
         } catch (Exception e) {
             res.log("DNS provider check FAILED: " + e.getMessage());
@@ -224,7 +222,19 @@ public class RenewalService {
         // 5. verify nginx really serves the new certificate
         if (s.verifyAfterInstall) {
             String want = CertInspector.sha256(fresh);
-            if (!waitForServed(s, want, res)) {
+            Served served = waitForServed(s, want, res);
+            if (served == Served.NO_ANSWER) {
+                // nothing answers on the HTTPS port: do not leave the appliance without a working web server
+                res.log("nginx is not answering after the restart - rolling back");
+                rollback(files, s, certBak, keyBak, res);
+                res.status = RenewalResult.Status.FAILED;
+                res.message = "New certificate installed, but nginx did not answer afterwards (waited "
+                        + s.verifyTimeoutSeconds + "s). The previous certificate was restored. Backups: "
+                        + certBak + ", " + keyBak;
+                res.log(res.message);
+                return;
+            }
+            if (served == Served.OTHER_CERT) {
                 res.status = RenewalResult.Status.FAILED;
                 res.message = "New certificate installed and nginx restarted, but nginx is not serving it "
                         + "(waited " + s.verifyTimeoutSeconds + "s). Backups: " + certBak + ", " + keyBak;
@@ -243,15 +253,20 @@ public class RenewalService {
         res.log(res.message);
     }
 
-    private boolean waitForServed(RenewalSettings s, String wantFingerprint, RenewalResult res) {
+    /** What the HTTPS port returned while waiting for the new certificate. */
+    enum Served { NEW_CERT, OTHER_CERT, NO_ANSWER }
+
+    private Served waitForServed(RenewalSettings s, String wantFingerprint, RenewalResult res) {
         long deadline = System.currentTimeMillis() + s.verifyTimeoutSeconds * 1000L;
         String last = "no connection yet";
+        boolean answered = false;
         while (true) {
             try {
                 X509Certificate served = prober.fetch(s);
+                answered = true;
                 String got = CertInspector.sha256(served);
                 if (got.equals(wantFingerprint)) {
-                    return true;
+                    return Served.NEW_CERT;
                 }
                 last = "serving fingerprint " + got;
             } catch (Exception e) {
@@ -259,13 +274,13 @@ public class RenewalService {
             }
             if (System.currentTimeMillis() >= deadline) {
                 res.log("Last probe result: " + last);
-                return false;
+                return answered ? Served.OTHER_CERT : Served.NO_ANSWER;
             }
             try {
                 Thread.sleep(3000);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                return false;
+                return answered ? Served.OTHER_CERT : Served.NO_ANSWER;
             }
         }
     }

@@ -12,7 +12,7 @@ Admin page: `https://<your-manager>/plugin/tls/admin`
 - footer badge ("Certificate: 63 days") for users with the permission; hidden for everyone else
 - follows the Morpheus user theme (light/dark)
 
-> Status: v0.10.6. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
+> Status: v0.11.0. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
 > DNS-01/Cloudflare, scheduled renewal of a due certificate, and the one-command setup from a clean state). The
 > "run the setup through Morpheus" option has been tested end to end (dry run, then a real install including the
 > nginx restart) on a manager that is itself a managed instance with an agent.
@@ -112,8 +112,6 @@ outdated.
 - **DNS-01 + Cloudflare** (recommended): API token with Zone > DNS > Edit. The zone is auto-detected (or give the
   zone id). The plugin waits for the TXT record on the authoritative name servers before asking Let's Encrypt to
   validate. Wildcards work with DNS-01.
-- **DNS-01 + custom hook script:** an absolute path to an executable called as
-  `script add <fqdn> <value>` and `script remove <fqdn> <value>` (no shell; a non-zero exit fails the run).
 - **HTTP-01:** needs port 80 reachable from the internet and a free port 80 for the plugin's temporary responder.
   On a normal appliance nginx owns port 80, so prefer DNS-01. Not validated on a real appliance.
 

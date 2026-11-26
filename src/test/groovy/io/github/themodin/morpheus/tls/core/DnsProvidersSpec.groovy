@@ -150,27 +150,6 @@ class DnsProvidersSpec extends Specification {
         thrown(IllegalArgumentException)
     }
 
-    def "hook provider runs the script with add/remove, fqdn, value and reports failures"() {
-        given:
-        def dir = Files.createTempDirectory('hook')
-        def log = dir.resolve('log').toFile()
-        def script = dir.resolve('hook.sh')
-        script.toFile().text = "#!/bin/sh\necho \"\$1 \$2 \$3\" >> ${log}\n[ \"\$1\" = add ] && [ \"\$2\" = fail.example.com ] && { echo boom; exit 3; }\nexit 0\n"
-        Files.setPosixFilePermissions(script, PosixFilePermissions.fromString('rwxr-xr-x'))
-        def hook = new HookDnsProvider(script.toString())
-        when:
-        hook.addTxt('_acme-challenge.a.example.com', 'v1')
-        hook.removeTxt('_acme-challenge.a.example.com', 'v1', 'hook')
-        then:
-        log.readLines() == ['add _acme-challenge.a.example.com v1', 'remove _acme-challenge.a.example.com v1']
-        when:
-        hook.addTxt('fail.example.com', 'v')
-        then:
-        def e = thrown(IOException)
-        e.message.contains('exited 3')
-        e.message.contains('boom')
-    }
-
     def "propagation check polls a DoH endpoint until the record shows up"() {
         given:
         int n = 0

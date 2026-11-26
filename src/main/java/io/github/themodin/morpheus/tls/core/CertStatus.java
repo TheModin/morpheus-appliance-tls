@@ -38,7 +38,7 @@ public final class CertStatus {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("domains", String.join(", ", s.domains));
         m.put("environment", s.useStaging ? "Let's Encrypt STAGING" : "Let's Encrypt production");
-        m.put("challenge", s.challengeType + ("dns-01".equals(s.challengeType) ? " (" + s.dnsProvider + ")" : ""));
+        m.put("challenge", s.challengeType + ("dns-01".equals(s.challengeType) ? " (cloudflare)" : ""));
         m.put("tokenConfigured", s.cloudflareApiToken != null ? "yes" : "no");
         m.put("renewBeforeDays", s.renewBeforeDays);
         m.put("checkedAt", now.toString());

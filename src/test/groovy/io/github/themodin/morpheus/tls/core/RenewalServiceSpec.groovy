@@ -191,6 +191,24 @@ class RenewalServiceSpec extends Specification {
         r.message.contains('not serving')
     }
 
+    def "nginx not answering after the restart rolls the old files back"() {
+        given:
+        installCurrent(TestCerts.leafPem(['m.example.com'], 90, -85))
+        def before = new File(certPath).text
+        def svc = new RenewalService(runner, { Instant.now() })
+            .withIssuer({ s, r -> issued() } as RenewalService.Issuer)
+            .withResponderFactory({ s, f -> new WebrootResponder(dir.toString(), f) } as RenewalService.ResponderFactory)
+            .withProber({ s -> throw new IOException('connection refused') } as RenewalService.Prober)
+        when:
+        def r = svc.run(settings())
+        then:
+        r.status == RenewalResult.Status.FAILED
+        r.message.contains('did not answer')
+        r.message.contains('restored')
+        new File(certPath).text == before
+        new File(keyPath).text == 'old-key'
+    }
+
     def "CA failure leaves the installed files untouched"() {
         given:
         installCurrent(TestCerts.leafPem(['m.example.com'], 90, -85))

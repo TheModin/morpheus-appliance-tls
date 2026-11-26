@@ -25,14 +25,10 @@ public class RenewalSettings {
 
     /** "dns-01" (default, needs no inbound ports, allows wildcards) or "http-01". */
     public String challengeType = "dns-01";
-    /** "cloudflare" or "hook". */
-    public String dnsProvider = "cloudflare";
     public String cloudflareApiToken;
     /** Optional; auto-detected from the domain when empty. */
     public String cloudflareZoneId;
     public String cloudflareApiBase = CloudflareDnsProvider.DEFAULT_API;
-    /** Script called as: script add|remove <fqdn> <value>. */
-    public String dnsHookScript;
     /** Public DoH JSON endpoint used to see the TXT record before validation; null disables the check. */
     public String dnsCheckUrl = DnsPropagation.DEFAULT_URL;
     public int dnsPropagationTimeoutSeconds = 120;
@@ -93,19 +89,11 @@ public class RenewalSettings {
             throw new IllegalArgumentException("Challenge type must be dns-01 or http-01, got: " + challengeType);
         }
         if (isDns01() && !checkOnly) {
-            if ("cloudflare".equals(dnsProvider)) {
-                if (cloudflareApiToken == null) {
-                    throw new IllegalArgumentException("A Cloudflare API token is required for dns-01");
-                }
-                if (cloudflareZoneId != null && !cloudflareZoneId.matches("^[0-9a-f]{32}$")) {
-                    throw new IllegalArgumentException("Cloudflare zone id must be 32 hex characters");
-                }
-            } else if ("hook".equals(dnsProvider)) {
-                if (dnsHookScript == null || !dnsHookScript.startsWith("/") || dnsHookScript.contains("..")) {
-                    throw new IllegalArgumentException("DNS hook script must be an absolute path");
-                }
-            } else {
-                throw new IllegalArgumentException("DNS provider must be cloudflare or hook, got: " + dnsProvider);
+            if (cloudflareApiToken == null) {
+                throw new IllegalArgumentException("A Cloudflare API token is required for dns-01");
+            }
+            if (cloudflareZoneId != null && !cloudflareZoneId.matches("^[0-9a-f]{32}$")) {
+                throw new IllegalArgumentException("Cloudflare zone id must be 32 hex characters");
             }
         }
         if (renewBeforeDays < 1 || renewBeforeDays > 89) {
@@ -144,11 +132,9 @@ public class RenewalSettings {
         s.forceRenew = bool(o, "forceRenew", s.forceRenew);
         s.checkOnly = bool(o, "checkOnly", s.checkOnly);
         s.challengeType = orDefault(str(o, "challengeType"), s.challengeType).toLowerCase();
-        s.dnsProvider = orDefault(str(o, "dnsProvider"), s.dnsProvider).toLowerCase();
         s.cloudflareApiToken = str(o, "cloudflareApiToken");
         s.cloudflareZoneId = str(o, "cloudflareZoneId");
         s.cloudflareApiBase = orDefault(str(o, "cloudflareApiBase"), s.cloudflareApiBase);
-        s.dnsHookScript = str(o, "dnsHookScript");
         String check = orDefault(str(o, "dnsCheckUrl"), s.dnsCheckUrl);
         s.dnsCheckUrl = "none".equalsIgnoreCase(check) ? null : check;
         s.dnsPropagationTimeoutSeconds = integer(o, "dnsPropagationTimeoutSeconds", s.dnsPropagationTimeoutSeconds);

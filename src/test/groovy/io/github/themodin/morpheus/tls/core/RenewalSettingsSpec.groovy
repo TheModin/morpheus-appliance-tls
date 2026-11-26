@@ -37,8 +37,6 @@ class RenewalSettingsSpec extends Specification {
         'wildcard http-01' | [domains: '*.example.com', contactEmail: 'a@b.se', challengeType: 'http-01']
         'dns no token'     | [domains: 'a.example.com', contactEmail: 'a@b.se']
         'bad zone id'      | [domains: 'a.example.com', contactEmail: 'a@b.se', cloudflareApiToken: 't', cloudflareZoneId: 'xyz']
-        'relative hook'    | [domains: 'a.example.com', contactEmail: 'a@b.se', dnsProvider: 'hook', dnsHookScript: 'hook.sh']
-        'unknown provider' | [domains: 'a.example.com', contactEmail: 'a@b.se', dnsProvider: 'godaddy']
         'unknown challenge'| [domains: 'a.example.com', contactEmail: 'a@b.se', challengeType: 'tls-alpn-01']
         'not an fqdn'      | [domains: 'localhost', contactEmail: 'a@b.se']
         'bad email'        | [domains: 'a.example.com', contactEmail: 'nope']

@@ -274,8 +274,11 @@
     var c = state.cert || {}, s = state.settings || {}, st = c.state || 'UNREACHABLE', run = state.running;
     var kids = [noticeBox, setupBox];
 
+    var setupReady = !!(setup && setup.ready);
     var btn = function (text, mode, kind) {
-      return h('button', {class: kind || '', disabled: run, text: text, onclick: function () { start(mode); }});
+      var blocked = mode !== 'check' && !setupReady;   // renewing needs the root-side setup; checking does not
+      return h('button', {class: kind || '', disabled: run || blocked, title: blocked ? 'Finish the one-time setup first' : '', text: text,
+        onclick: function () { start(mode); }});
     };
     kids.push(h('div', {class: 'card banner ' + cls(st)}, [
       h('div', {class: 'grow'}, [
@@ -296,10 +299,8 @@
         field('Contact e-mail', h('input', {type: 'text', id: 'f-contactEmail', value: s.contactEmail || ''})),
         field('Certificate authority', sel('f-useStaging', [['true', 'Let\'s Encrypt STAGING (test, not trusted)'], ['false', 'Let\'s Encrypt production']], s.useStaging === 'false' ? 'false' : 'true')),
         field('Challenge type', sel('f-challengeType', [['dns-01', 'DNS-01 (no open port needed)'], ['http-01', 'HTTP-01 (needs port 80 from the internet)']], s.challengeType)),
-        field('DNS provider', sel('f-dnsProvider', [['cloudflare', 'Cloudflare'], ['hook', 'Custom hook script']], s.dnsProvider)),
         field('Cloudflare API token', h('input', {type: 'password', id: 'f-cloudflareApiToken', placeholder: tokenPh, autocomplete: 'off'})),
         field('Cloudflare zone id (optional, auto-detected)', h('input', {type: 'text', id: 'f-cloudflareZoneId', value: s.cloudflareZoneId || ''})),
-        field('DNS hook script (absolute path, for provider "hook")', h('input', {type: 'text', id: 'f-dnsHookScript', value: s.dnsHookScript || ''})),
         field('Renew when fewer than N days remain', h('input', {type: 'number', id: 'f-renewBeforeDays', min: 1, max: 89, value: s.renewBeforeDays || '30'})),
         h('div', {class: 'check'}, [h('input', {type: 'checkbox', id: 'f-autoRenew', checked: s.autoRenew === 'true'}),
           h('label', {for: 'f-autoRenew', text: 'Renew automatically (checked once a day)'})])]),
@@ -323,8 +324,8 @@
   function val(id) { return document.getElementById(id).value; }
   function save() {
     var body = {domains: val('f-domains'), contactEmail: val('f-contactEmail'), useStaging: val('f-useStaging'),
-      challengeType: val('f-challengeType'), dnsProvider: val('f-dnsProvider'), cloudflareApiToken: val('f-cloudflareApiToken'),
-      cloudflareZoneId: val('f-cloudflareZoneId'), dnsHookScript: val('f-dnsHookScript'), renewBeforeDays: val('f-renewBeforeDays'),
+      challengeType: val('f-challengeType'), cloudflareApiToken: val('f-cloudflareApiToken'),
+      cloudflareZoneId: val('f-cloudflareZoneId'), renewBeforeDays: val('f-renewBeforeDays'),
       autoRenew: document.getElementById('f-autoRenew').checked ? 'true' : 'false'};
     var m = document.getElementById('savemsg'); m.textContent = 'Saving\u2026';
     api('settings', body).then(function (d) {

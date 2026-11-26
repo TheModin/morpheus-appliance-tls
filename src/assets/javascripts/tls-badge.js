@@ -6,8 +6,9 @@
   var KEY = 'tls-badge', TTL = 5 * 60 * 1000;
   function show(c) {
     var st = c.state || 'UNREACHABLE';
-    a.textContent = 'Certificate: ' + (st === 'OK' || st === 'RENEWAL_DUE' ? c.daysRemaining + ' days' : st.replace(/_/g, ' ').toLowerCase());
-    a.className = 'tls-badge ' + (st === 'OK' ? 'ok' : st === 'RENEWAL_DUE' || st === 'STAGING' ? 'warn' : 'bad');
+    a.textContent = 'Certificate: ' + (st === 'OK' || st === 'RENEWAL_DUE' ? c.daysRemaining + ' days' : st.replace(/_/g, ' ').toLowerCase()) +
+      (c.lastRunFailed ? ' \u2013 last renewal run failed' : '');
+    a.className = 'tls-badge ' + (st === 'OK' && !c.lastRunFailed ? 'ok' : st === 'OK' || st === 'RENEWAL_DUE' || st === 'STAGING' ? 'warn' : 'bad');
     a.style.display = 'block';
     avoid();
     // other floating widgets (e.g. the Morpheus Copilot button) may load later

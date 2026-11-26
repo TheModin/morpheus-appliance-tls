@@ -96,7 +96,9 @@ class AdminController implements PluginController {
             RenewalSettings s = store.toRenewalSettings(store.load(), true, false)
             Map full = CertStatus.collect(s, Instant.now(), { RenewalSettings x ->
                 TlsProbe.fetchLeaf(x.verifyHost, x.verifyPort, x.primaryDomain(), 3000) } as CertStatus.Prober)
-            cached = [state: full.state, daysRemaining: full.daysRemaining]
+            Map last = runner.lastRun()
+            cached = [state: full.state, daysRemaining: full.daysRemaining,
+                      lastRunFailed: last != null && last.success == false]
             badgeCache = cached
             badgeCachedAt = now
         }
@@ -198,7 +200,12 @@ class AdminController implements PluginController {
         if (!isPost(model)) return JsonResponse.of(SettingsStore.masked(store.load()))
         if (!xhr(model)) return forbidden()
         Map body = readBody(model)
-        Map<String, String> saved = store.save(body)
+        Map<String, String> saved
+        try {
+            saved = store.save(body)
+        } catch (SettingsStore.SettingsUnavailableException e) {
+            return error(e.message, 409)
+        }
         badgeCache = null
         try {
             store.toRenewalSettings(saved, true, false).validate()

@@ -39,6 +39,11 @@ appliance.
 - The helper only touches files below `/etc/morpheus/ssl/` (symlinks resolved, `..` refused), only `*.pem`, `*.crt`
   and `*.key`, only PEM content, and only the file modes 0600, 0640 and 0644. It cannot run commands and cannot reach
   `morpheus.rb` or `morpheus-secrets.json`. Key material is passed on stdin and is never logged.
+- Known limitation: `sudo` lets the application user run the helper, so any code that runs as that user (including
+  other Morpheus plugins) can read or replace `/etc/morpheus/ssl/*.pem|crt|key` through it. The helper narrows what
+  can be done (see above) but cannot tell the TLS plugin apart from other code running as the same OS user.
+- On a clustered Morpheus the scheduled renewal takes a short lease in Cypher so only one node runs it. Cypher has no
+  compare-and-set, so this is best effort.
 - The DNS token is stored in Morpheus Cypher and is never returned by the API (only a "token is set" flag). The ACME
   account key is `/etc/morpheus/ssl/acme-account.pem` with mode 0600.
 - The admin page and API routes require the `tlsApplianceCert` permission. POST routes require the Morpheus CSRF token
@@ -46,5 +51,3 @@ appliance.
 - The setup script is installed by an administrator, never by the plugin, so a plugin upgrade cannot widen its own
   privileges. It validates the sudoers file with `visudo -c`, backs up `/etc/morpheus` first, and restores `morpheus.rb`
   if the reconfigure fails.
-- A custom DNS hook script (if configured) is run by the plugin as the application user. It is an administrator-set
-  path and is not a place for untrusted input.
