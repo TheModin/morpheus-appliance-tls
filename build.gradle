@@ -17,7 +17,7 @@ apply plugin: 'groovy'
 apply plugin: 'idea'
 
 group = 'io.github.themodin.morpheus'
-version = '0.11.0'
+version = '0.11.1'
 
 sourceCompatibility = '1.11'
 targetCompatibility = '1.11'
@@ -106,5 +106,6 @@ processResources.dependsOn 'composeSetupScript'
 // Plugin asset URLs do not change between versions, so browsers keep serving cached JS/CSS after an upgrade.
 // Stamp the version into the admin page's asset URLs so a new version is fetched without a hard reload.
 processResources {
+    inputs.property('pluginVersion', project.version.toString())   // so a version bump re-stamps the admin page
     filesMatching('renderer/hbs/admin.hbs') { filter { String line -> line.replace('@VERSION@', project.version.toString()) } }
 }

@@ -12,7 +12,7 @@ Admin page: `https://<your-manager>/plugin/tls/admin`
 - footer badge ("Certificate: 63 days") for users with the permission; hidden for everyone else
 - follows the Morpheus user theme (light/dark)
 
-> Status: v0.11.0. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
+> Status: v0.11.1. Validated on Morpheus 9.1.0-3 on a VM Essentials manager (staging and production issuance via
 > DNS-01/Cloudflare, scheduled renewal of a due certificate, and the one-command setup from a clean state). The
 > "run the setup through Morpheus" option has been tested end to end (dry run, then a real install including the
 > nginx restart) on a manager that is itself a managed instance with an agent.

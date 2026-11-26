@@ -115,6 +115,7 @@
       if (!d.error) setup = d;
       else if (!setup) { setupBox.className = 'card'; setupBox.replaceChildren(h('p', {class: 'muted', text: 'Could not check the setup: ' + d.error})); }
       renderSetup();
+      if (state) render();   // the Renew buttons depend on the setup result
       // while something is missing, keep checking so the list turns green by itself after the command was run
       if (setup && !setup.ready) setupTimer = setTimeout(loadSetup, 5000);
     });
