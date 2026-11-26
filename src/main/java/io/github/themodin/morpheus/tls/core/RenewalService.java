@@ -44,18 +44,21 @@ public class RenewalService {
     }
 
     /** Check-only runs also prove the DNS credentials work, without creating any record. */
-    private void checkDnsAccess(RenewalSettings s, RenewalResult res) {
+    private String checkDnsAccess(RenewalSettings s, RenewalResult res) {
         if (s.cloudflareApiToken == null) {
             res.log("DNS provider check: no Cloudflare API token configured");
-            return;
+            return "no Cloudflare API token configured";
         }
         try {
             String name = "_acme-challenge." + s.primaryDomain().replaceFirst("^\\*\\.", "");
             java.util.List<String> ns = dnsProviderFor(s).authoritativeServers(name);
             res.log(ns.isEmpty() ? "DNS provider check: Cloudflare configured (no zone lookup available)"
                     : "DNS provider check OK: zone found, authoritative servers " + ns);
+            return null;
         } catch (Exception e) {
-            res.log("DNS provider check FAILED: " + e.getMessage());
+            String why = e.getMessage() != null ? e.getMessage() : e.toString();
+            res.log("DNS provider check FAILED: " + why);
+            return why;
         }
     }
 
@@ -146,8 +149,9 @@ public class RenewalService {
             res.log("Days remaining: " + CertInspector.daysRemaining(current, now));
         }
 
+        String dnsProblem = null;
         if (s.checkOnly && s.isDns01()) {
-            checkDnsAccess(s, res);
+            dnsProblem = checkDnsAccess(s, res);
         }
         if (s.checkOnly) {
             String warn = nginxPathProblem(s);
@@ -174,13 +178,22 @@ public class RenewalService {
             res.status = RenewalResult.Status.UP_TO_DATE;
             res.message = "Certificate is valid for " + CertInspector.daysRemaining(current, now)
                     + " more days; no renewal needed";
+            if (!s.checkOnly && s.isDns01()) {
+                dnsProblem = checkDnsAccess(s, res);   // the daily run also notices a revoked token early
+            }
+            if (dnsProblem != null) {
+                // valid today, but the next renewal would fail: do not report this as healthy
+                res.status = RenewalResult.Status.FAILED;
+                res.message += ", but the DNS access check failed (" + dnsProblem + ") - the next renewal would fail";
+            }
             res.log(res.message);
             return;
         }
         res.log("Renewal needed: " + reason);
         if (s.checkOnly) {
-            res.status = RenewalResult.Status.RENEWAL_DUE;
-            res.message = "Renewal due (" + reason + "); check-only run, nothing changed";
+            res.status = dnsProblem == null ? RenewalResult.Status.RENEWAL_DUE : RenewalResult.Status.FAILED;
+            res.message = "Renewal due (" + reason + "); check-only run, nothing changed"
+                    + (dnsProblem == null ? "" : ". The DNS access check failed (" + dnsProblem + ")");
             res.log(res.message);
             return;
         }

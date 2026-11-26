@@ -88,6 +88,18 @@ class RenewalServiceSpec extends Specification {
         runner.commands.isEmpty()
     }
 
+    def "check-only run with a valid cert but broken DNS access is reported as FAILED"() {
+        given:
+        installCurrent(TestCerts.leafPem(['m.example.com'], 90, -10))
+        def s = settings(checkOnly: true, challengeType: 'dns-01', cloudflareApiToken: 'tok', cloudflareApiBase: 'http://127.0.0.1:1')
+        when:
+        def r = service().run(s)
+        then:
+        r.status == RenewalResult.Status.FAILED
+        r.message.contains('DNS access check failed')
+        r.message.contains('valid for')
+    }
+
     def "expiring certificate gets renewed, installed, nginx restarted, verified"() {
         given:
         installCurrent(TestCerts.leafPem(['m.example.com'], 90, -85))
